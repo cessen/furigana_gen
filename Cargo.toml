@@ -15,3 +15,10 @@ quick-xml = "0.36.1"
 [build-dependencies]
 lzma-rs = "0.3"
 lz4_flex = "0.11"
+
+# This makes the (de)compresssion of the dictionary at build time
+# faster, improving over-all build times.
+[profile.dev.build-override]
+opt-level = 2
+[profile.release.build-override]
+opt-level = 2
