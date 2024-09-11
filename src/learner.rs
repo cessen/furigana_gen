@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-const LEARN_RATE: f64 = 1.0;
-const MIN_MAX_DISTANCE: usize = 100;
-const MAX_MAX_DISTANCE: usize = 10000;
+const LEARN_RATE: f64 = 0.7;
+const MIN_MAX_DISTANCE: usize = 10;
+const MAX_MAX_DISTANCE: usize = 75000;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct WordStats {
@@ -33,17 +33,17 @@ impl Learner {
 
     /// Returns the word stats, sorted by how "well known" they are according
     /// to the `max_distance` metric.
-    pub(crate) fn word_stats(&self) -> Vec<(String, WordStats)> {
+    pub(crate) fn word_stats(&self) -> (usize, Vec<(String, WordStats)>) {
         let mut stats: Vec<(String, WordStats)> = self
             .stats
             .iter()
             .map(|(w, s)| (w.clone(), s.clone()))
             .collect();
 
-        stats.sort_unstable_by_key(|(_, s)| s.max_distance);
+        stats.sort_unstable_by_key(|(_, s)| (s.max_distance, s.times_seen));
         stats.reverse();
 
-        stats
+        (self.words_processed, stats)
     }
 
     pub fn record(&mut self, word: &str) {
@@ -58,10 +58,8 @@ impl Learner {
                     return;
                 }
 
-                if distance < stats.max_distance {
-                    stats.max_distance +=
-                        distance.min((stats.max_distance as f64 * LEARN_RATE) as usize);
-                }
+                stats.max_distance +=
+                    distance.min((stats.max_distance as f64 * LEARN_RATE) as usize);
 
                 stats.max_distance = stats.max_distance.min(MAX_MAX_DISTANCE);
             })

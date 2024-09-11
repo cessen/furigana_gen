@@ -51,17 +51,21 @@ impl FuriganaGenerator {
         Self {
             tokenizer: Tokenizer::new(dict),
             exclude_kanji: exclude_kanji,
-            learner: Learner::new(if learn_mode { 5 } else { usize::MAX }),
+            learner: Learner::new(if learn_mode { 3 } else { usize::MAX }),
         }
     }
 
-    pub fn word_stats(&self) -> Vec<(String, usize, usize)> {
-        let mut stats = self.learner.word_stats();
+    /// Returns (total_words_processed, Vec<(Word, distance, times_seen)>)
+    pub fn word_stats(&self) -> (usize, Vec<(String, usize, usize)>) {
+        let (total_words, mut stats) = self.learner.word_stats();
 
-        stats
-            .drain(..)
-            .map(|(w, s)| (w, s.max_distance, s.times_seen))
-            .collect()
+        (
+            total_words,
+            stats
+                .drain(..)
+                .map(|(w, s)| (w, s.max_distance, s.times_seen))
+                .collect(),
+        )
     }
 
     pub fn add_html_furigana(&mut self, text: &str) -> String {
