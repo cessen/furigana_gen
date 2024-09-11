@@ -55,6 +55,15 @@ impl FuriganaGenerator {
         }
     }
 
+    pub fn word_stats(&self) -> Vec<(String, usize, usize)> {
+        let mut stats = self.learner.word_stats();
+
+        stats
+            .drain(..)
+            .map(|(w, s)| (w, s.max_distance, s.times_seen))
+            .collect()
+    }
+
     pub fn add_html_furigana(&mut self, text: &str) -> String {
         add_html_furigana_skip_already_ruby(
             &text,
@@ -83,7 +92,12 @@ fn add_html_furigana_skip_already_ruby(
 
     loop {
         match reader.read_event() {
-            Err(e) => panic!("Error at position {}: {:?}", reader.error_position(), e),
+            Err(_) => {
+                // If we hit a parse error, just don't add furigana.
+                // But still panic in debug, so we can track things down.
+                debug_assert!(false);
+                return text.into();
+            }
             Ok(Event::Eof) => break,
 
             Ok(Event::Start(e)) => {

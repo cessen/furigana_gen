@@ -1,18 +1,19 @@
 use std::collections::HashMap;
 
+const LEARN_RATE: f64 = 1.0;
 const MIN_MAX_DISTANCE: usize = 100;
 const MAX_MAX_DISTANCE: usize = 10000;
 
 #[derive(Debug, Copy, Clone)]
-struct WordStats {
+pub(crate) struct WordStats {
     // The last position (in words processed) that this word was seen at.
     last_seen_at: usize,
 
     // How many times this word has been seen so far.
-    times_seen: usize,
+    pub times_seen: usize,
 
     // Maximum distance before helps is needed again.
-    max_distance: usize,
+    pub max_distance: usize,
 }
 
 pub struct Learner {
@@ -30,6 +31,21 @@ impl Learner {
         }
     }
 
+    /// Returns the word stats, sorted by how "well known" they are according
+    /// to the `max_distance` metric.
+    pub(crate) fn word_stats(&self) -> Vec<(String, WordStats)> {
+        let mut stats: Vec<(String, WordStats)> = self
+            .stats
+            .iter()
+            .map(|(w, s)| (w.clone(), s.clone()))
+            .collect();
+
+        stats.sort_unstable_by_key(|(_, s)| s.max_distance);
+        stats.reverse();
+
+        stats
+    }
+
     pub fn record(&mut self, word: &str) {
         self.stats
             .entry(word.to_string())
@@ -43,7 +59,8 @@ impl Learner {
                 }
 
                 if distance < stats.max_distance {
-                    stats.max_distance += distance.min((stats.max_distance as f64 * 0.5) as usize);
+                    stats.max_distance +=
+                        distance.min((stats.max_distance as f64 * LEARN_RATE) as usize);
                 }
 
                 stats.max_distance = stats.max_distance.min(MAX_MAX_DISTANCE);
