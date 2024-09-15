@@ -47,6 +47,10 @@ impl Learner {
     }
 
     pub fn record(&mut self, word: &str) {
+        if self.times_seen_threshold == usize::MAX {
+            return;
+        }
+
         self.stats
             .entry(word.to_string())
             .and_modify(|stats| {
@@ -72,6 +76,10 @@ impl Learner {
     }
 
     pub fn needs_help(&self, word: &str) -> bool {
+        if self.times_seen_threshold == usize::MAX {
+            return true;
+        }
+
         if let Some(stats) = self.stats.get(word) {
             let distance = self.words_processed - stats.last_seen_at;
             stats.times_seen <= self.times_seen_threshold || distance > stats.max_distance

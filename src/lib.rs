@@ -1,11 +1,11 @@
 mod learner;
 
 use std::{
-    collections::HashSet,
-    // fs::File,
+    borrow::Cow,
     io::{Cursor, Read},
 };
 
+use fnv::{FnvHashMap, FnvHashSet};
 use lz4_flex::frame::FrameDecoder;
 use quick_xml::events::Event;
 use vibrato::{Dictionary, Tokenizer};
@@ -17,10 +17,24 @@ include!(concat!(env!("OUT_DIR"), "/kanji_freq_inc.rs"));
 
 const DICT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/system.dic.lz4"));
 
+/// A list of words that the tokenizer insists on using the less common reading
+/// for, with the more common reading that should be substituted.
+///
+/// (surface, feature, substitute_feature)
+const COMMON_SUBS: &[(&str, &str, &str)] = &[
+    ("額", "名詞-普通名詞-一般,ガク", "名詞-普通名詞-一般,ヒタイ"),
+    (
+        "他",
+        "名詞-普通名詞-副詞可能,タ",
+        "名詞-普通名詞-副詞可能,ホカ",
+    ),
+    ("私", "代名詞,ワタクシ", "代名詞,ワタシ"),
+];
+
 pub struct FuriganaGenerator {
     tokenizer: Tokenizer,
-    exclude_kanji: HashSet<char>,
-    learner: Learner,
+    exclude_kanji: FnvHashSet<char>,
+    subs: FnvHashMap<(Cow<'static, str>, Cow<'static, str>), String>,
 }
 
 impl FuriganaGenerator {
@@ -28,7 +42,7 @@ impl FuriganaGenerator {
     // Specifically, words made up *entirely* of those kanji will be excluded.
     // If a word has some kanji that aren't in that set, even if it also has
     // some that are, it will still get furigana.
-    pub fn new(exclude_count: usize, learn_mode: bool) -> Self {
+    pub fn new(exclude_count: usize) -> Self {
         let dict = {
             // Note: we could just pass the decoder straight to `Dictionary::read()`
             // below, and it would work.  However, that ends up being slower than
@@ -41,20 +55,46 @@ impl FuriganaGenerator {
         };
 
         let exclude_kanji = {
-            let mut set = HashSet::new();
+            let mut set = FnvHashSet::default();
             for &c in KANJI_FREQ.iter().take(exclude_count) {
                 set.insert(c);
             }
             set
         };
 
+        let subs = {
+            let mut map: FnvHashMap<(Cow<str>, Cow<str>), String> = FnvHashMap::default();
+            for (surface, feature, sub_feature) in COMMON_SUBS.iter().copied() {
+                map.insert((surface.into(), feature.into()), sub_feature.into());
+            }
+            map
+        };
+
         Self {
             tokenizer: Tokenizer::new(dict),
             exclude_kanji: exclude_kanji,
-            learner: Learner::new(if learn_mode { 3 } else { usize::MAX }),
+            subs: subs,
         }
     }
 
+    pub fn new_session(&self, learn_mode: bool) -> Session<'_> {
+        Session {
+            tokenizer: &self.tokenizer,
+            exclude_kanji: &self.exclude_kanji,
+            subs: &self.subs,
+            learner: Learner::new(if learn_mode { 3 } else { usize::MAX }),
+        }
+    }
+}
+
+pub struct Session<'a> {
+    tokenizer: &'a Tokenizer,
+    exclude_kanji: &'a FnvHashSet<char>,
+    subs: &'a FnvHashMap<(Cow<'a, str>, Cow<'a, str>), String>,
+    learner: Learner,
+}
+
+impl<'a> Session<'a> {
     /// Returns (total_words_processed, Vec<(Word, distance, times_seen)>)
     pub fn word_stats(&self) -> (usize, Vec<(String, usize, usize)>) {
         let (total_words, mut stats) = self.learner.word_stats();
@@ -73,6 +113,7 @@ impl FuriganaGenerator {
             &text,
             &self.tokenizer,
             &self.exclude_kanji,
+            &self.subs,
             &mut self.learner,
         )
     }
@@ -86,7 +127,8 @@ fn to_str<B: std::ops::Deref<Target = [u8]>>(bytes: &B) -> &str {
 fn add_html_furigana_skip_already_ruby(
     text: &str,
     tokenizer: &Tokenizer,
-    exclude_kanji: &HashSet<char>,
+    exclude_kanji: &FnvHashSet<char>,
+    subs: &FnvHashMap<(Cow<str>, Cow<str>), String>,
     learner: &mut Learner,
 ) -> String {
     let mut reader = quick_xml::Reader::from_str(text);
@@ -124,6 +166,7 @@ fn add_html_furigana_skip_already_ruby(
                         to_str(&e),
                         tokenizer,
                         exclude_kanji,
+                        subs,
                         learner,
                     ));
                 } else {
@@ -205,7 +248,8 @@ fn write_xml(text: &mut String, event: &quick_xml::events::Event) {
 fn add_html_furigana(
     text: &str,
     tokenizer: &Tokenizer,
-    exclude_kanji: &HashSet<char>,
+    exclude_kanji: &FnvHashSet<char>,
+    subs: &FnvHashMap<(Cow<str>, Cow<str>), String>,
     learner: &mut Learner,
 ) -> String {
     let mut worker = tokenizer.new_worker();
@@ -216,7 +260,16 @@ fn add_html_furigana(
     let mut new_text = String::new();
     for i in 0..worker.num_tokens() {
         let t = worker.token(i);
-        let surface = t.surface();
+        let (surface, feature) = {
+            let surface = t.surface();
+            let feature = t.feature();
+
+            if let Some(sub_feature) = subs.get(&(Cow::from(surface), Cow::from(feature))) {
+                (surface, sub_feature.as_str())
+            } else {
+                (surface, feature)
+            }
+        };
 
         let needs_help = learner.needs_help(surface);
         learner.record(surface);
@@ -226,7 +279,7 @@ fn add_html_furigana(
             continue;
         }
 
-        let kana = t.feature().split(",").nth(1).unwrap();
+        let kana = feature.split(",").nth(1).unwrap();
 
         let furigana_text = apply_furigana(surface, kana, exclude_kanji);
 
@@ -254,7 +307,7 @@ fn add_html_furigana(
 fn apply_furigana<'a>(
     surface: &'a str,
     kana: &'a str,
-    exclude_kanji: &HashSet<char>,
+    exclude_kanji: &FnvHashSet<char>,
 ) -> Vec<(&'a str, &'a str)> {
     let mut out = Vec::new();
 
@@ -395,7 +448,7 @@ pub fn normalize_kana(c: char) -> Option<char> {
 }
 
 /// Returns true if furigana defininitely isn't needed.
-pub fn furigana_unneeded(text: &str, exclude_kanji: &HashSet<char>) -> bool {
+pub fn furigana_unneeded(text: &str, exclude_kanji: &FnvHashSet<char>) -> bool {
     text.chars().all(|c| {
         is_kana(c) || c.is_ascii() || c.is_numeric() || c == '々' || exclude_kanji.contains(&c)
     })
@@ -423,11 +476,18 @@ pub fn katakana_to_hiragana(c: char) -> Option<char> {
 mod tests {
     use super::*;
 
+    // Share `FuriganaGenerator` among tests, since it's expensive to set up.
+    pub fn get_furigana_gen() -> &'static FuriganaGenerator {
+        use std::sync::OnceLock;
+        static FURIGEN: OnceLock<FuriganaGenerator> = OnceLock::new();
+        FURIGEN.get_or_init(|| FuriganaGenerator::new(0))
+    }
+
     #[test]
     fn apply_furigana_01() {
         let surface = "へぇ";
         let kana = "ヘー";
-        let pairs = apply_furigana(surface, kana, &HashSet::new());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
 
         assert_eq!(&[("へぇ", "")], &pairs[..]);
     }
@@ -436,7 +496,7 @@ mod tests {
     fn apply_furigana_02() {
         let surface = "へぇー";
         let kana = "ヘー";
-        let pairs = apply_furigana(surface, kana, &HashSet::new());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
 
         assert_eq!(&[("へぇー", "")], &pairs[..]);
     }
@@ -445,7 +505,7 @@ mod tests {
     fn apply_furigana_03() {
         let surface = "へ";
         let kana = "え";
-        let pairs = apply_furigana(surface, kana, &HashSet::new());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
 
         assert_eq!(&[("へ", "")], &pairs[..]);
     }
@@ -454,7 +514,7 @@ mod tests {
     fn apply_furigana_04() {
         let surface = "食べる";
         let kana = "タベル";
-        let pairs = apply_furigana(surface, kana, &HashSet::new());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
 
         assert_eq!(&[("食", "タ"), ("べる", "")], &pairs[..]);
     }
@@ -463,7 +523,7 @@ mod tests {
     fn apply_furigana_05() {
         let surface = "流れ出す";
         let kana = "ながれだす";
-        let pairs = apply_furigana(surface, kana, &HashSet::new());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
 
         assert_eq!(
             &[("流", "なが"), ("れ", ""), ("出", "だ"), ("す", "")],
@@ -475,7 +535,7 @@ mod tests {
     fn apply_furigana_06() {
         let surface = "物の怪";
         let kana = "もののけ";
-        let pairs = apply_furigana(surface, kana, &HashSet::new());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
 
         assert_eq!(&[("物の怪", "もののけ")], &pairs[..]);
     }
@@ -504,9 +564,9 @@ mod tests {
 
     #[test]
     fn tokenize_01() {
-        let gen = FuriganaGenerator::new(0, false);
+        let mut worker = get_furigana_gen().tokenizer.new_worker();
 
-        let mut worker = gen.tokenizer.new_worker();
+        // General.
         worker.reset_sentence("食べている");
         worker.tokenize();
 
@@ -521,7 +581,7 @@ mod tests {
 
     #[test]
     fn add_html_furigana_01() {
-        let mut gen = FuriganaGenerator::new(0, false);
+        let mut gen = get_furigana_gen().new_session(false);
 
         let text = gen
             .add_html_furigana(r#"<sup class="食う">食べる</sup>のは<ruby>良</ruby>いね！<hi />"#);
@@ -529,6 +589,22 @@ mod tests {
         assert_eq!(
             text,
             r#"<sup class="食う"><ruby>食<rt>タ</rt></ruby>べる</sup>のは<ruby>良</ruby>いね！<hi />"#
+        );
+    }
+
+    // Testing custom substitutions.
+    #[test]
+    fn add_html_furigana_02() {
+        let mut gen = get_furigana_gen().new_session(false);
+
+        assert_eq!(
+            gen.add_html_furigana("額"),
+            "<ruby>額<rt>ヒタイ</rt></ruby>"
+        );
+        assert_eq!(gen.add_html_furigana("他"), "<ruby>他<rt>ホカ</rt></ruby>");
+        assert_eq!(
+            gen.add_html_furigana("私"),
+            "<ruby>私<rt>ワタシ</rt></ruby>"
         );
     }
 }
