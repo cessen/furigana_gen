@@ -380,7 +380,7 @@ fn apply_furigana<'a>(
     }
 
     // Left over.
-    out.insert(out.len() - 2, (surface, kana));
+    out.insert(out.len() - 1, (surface, kana));
 
     out.iter().filter(|(s, _)| !s.is_empty()).copied().collect()
 }
@@ -538,6 +538,15 @@ mod tests {
         let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
 
         assert_eq!(&[("物の怪", "もののけ")], &pairs[..]);
+    }
+
+    #[test]
+    fn apply_furigana_07() {
+        let surface = "ご飯";
+        let kana = "ゴハン";
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
+
+        assert_eq!(&[("ご", ""), ("飯", "ハン")], &pairs[..]);
     }
 
     #[test]
