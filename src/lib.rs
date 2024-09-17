@@ -35,6 +35,7 @@ pub struct FuriganaGenerator {
     tokenizer: Tokenizer,
     exclude_kanji: FnvHashSet<char>,
     subs: FnvHashMap<(Cow<'static, str>, Cow<'static, str>), String>,
+    use_hiragana: bool,
 }
 
 impl FuriganaGenerator {
@@ -42,7 +43,7 @@ impl FuriganaGenerator {
     // Specifically, words made up *entirely* of those kanji will be excluded.
     // If a word has some kanji that aren't in that set, even if it also has
     // some that are, it will still get furigana.
-    pub fn new(exclude_count: usize) -> Self {
+    pub fn new(exclude_count: usize, use_hiragana: bool) -> Self {
         let dict = {
             // Note: we could just pass the decoder straight to `Dictionary::read()`
             // below, and it would work.  However, that ends up being slower than
@@ -74,6 +75,7 @@ impl FuriganaGenerator {
             tokenizer: Tokenizer::new(dict),
             exclude_kanji: exclude_kanji,
             subs: subs,
+            use_hiragana: use_hiragana,
         }
     }
 
@@ -83,6 +85,7 @@ impl FuriganaGenerator {
             exclude_kanji: &self.exclude_kanji,
             subs: &self.subs,
             learner: Learner::new(if learn_mode { 3 } else { usize::MAX }),
+            use_hiragana: self.use_hiragana,
         }
     }
 }
@@ -92,6 +95,7 @@ pub struct Session<'a> {
     exclude_kanji: &'a FnvHashSet<char>,
     subs: &'a FnvHashMap<(Cow<'a, str>, Cow<'a, str>), String>,
     learner: Learner,
+    use_hiragana: bool,
 }
 
 impl<'a> Session<'a> {
@@ -115,6 +119,7 @@ impl<'a> Session<'a> {
             &self.exclude_kanji,
             &self.subs,
             &mut self.learner,
+            self.use_hiragana,
         )
     }
 }
@@ -130,6 +135,7 @@ fn add_html_furigana_skip_already_ruby(
     exclude_kanji: &FnvHashSet<char>,
     subs: &FnvHashMap<(Cow<str>, Cow<str>), String>,
     learner: &mut Learner,
+    use_hiragana: bool,
 ) -> String {
     let mut reader = quick_xml::Reader::from_str(text);
 
@@ -168,6 +174,7 @@ fn add_html_furigana_skip_already_ruby(
                         exclude_kanji,
                         subs,
                         learner,
+                        use_hiragana,
                     ));
                 } else {
                     write_xml(&mut new_text, &Event::Text(e));
@@ -251,6 +258,7 @@ fn add_html_furigana(
     exclude_kanji: &FnvHashSet<char>,
     subs: &FnvHashMap<(Cow<str>, Cow<str>), String>,
     learner: &mut Learner,
+    use_hiragana: bool,
 ) -> String {
     let mut worker = tokenizer.new_worker();
 
@@ -279,9 +287,16 @@ fn add_html_furigana(
             continue;
         }
 
-        let kana = feature.split(",").nth(1).unwrap();
+        let kana = {
+            let kana = feature.split(",").nth(1).unwrap();
+            if use_hiragana {
+                katakana_to_hiragana_string(kana)
+            } else {
+                kana.into()
+            }
+        };
 
-        let furigana_text = apply_furigana(surface, kana, exclude_kanji);
+        let furigana_text = apply_furigana(surface, &kana, exclude_kanji);
 
         for (surf, furi) in furigana_text.iter() {
             if furi.is_empty() {
@@ -472,6 +487,16 @@ pub fn katakana_to_hiragana(c: char) -> Option<char> {
     }
 }
 
+pub fn katakana_to_hiragana_string(text: &str) -> String {
+    let mut new_text = String::new();
+
+    for c in text.chars() {
+        new_text.push(katakana_to_hiragana(c).unwrap_or(c));
+    }
+
+    new_text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,7 +505,7 @@ mod tests {
     pub fn get_furigana_gen() -> &'static FuriganaGenerator {
         use std::sync::OnceLock;
         static FURIGEN: OnceLock<FuriganaGenerator> = OnceLock::new();
-        FURIGEN.get_or_init(|| FuriganaGenerator::new(0))
+        FURIGEN.get_or_init(|| FuriganaGenerator::new(0, false))
     }
 
     #[test]
