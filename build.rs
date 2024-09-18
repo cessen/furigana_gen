@@ -29,11 +29,11 @@ fn main() {
         f.write_all("\n];".as_bytes()).unwrap();
     }
 
-    // Write compressed dictionary to .lz4 file.
+    // Write compressed parsing dictionary to .lz4 file.
     {
         // Read and decompress file from .xz.
         let dict_data = {
-            let f = File::open("data/dictionary/system.dic.xz").unwrap();
+            let f = File::open("data/ipadic-mecab-2_7_0/system.dic.xz").unwrap();
             let mut data = Vec::new();
             lzma_rs::xz_decompress(&mut BufReader::new(f), &mut data).unwrap();
 
@@ -42,6 +42,25 @@ fn main() {
 
         // Recompress to .lz4.
         let dest_path = Path::new(&out_dir).join("system.dic.lz4");
+        let f = File::create(dest_path).unwrap();
+        let mut encoder = lz4_flex::frame::FrameEncoder::new(f);
+        encoder.write(&dict_data).unwrap();
+        encoder.finish().unwrap();
+    }
+
+    // Write compressed pitch accent dictionary to .lz4 file.
+    {
+        // Read and decompress file from .xz.
+        let dict_data = {
+            let f = File::open("data/accents.tsv.xz").unwrap();
+            let mut data = Vec::new();
+            lzma_rs::xz_decompress(&mut BufReader::new(f), &mut data).unwrap();
+
+            data
+        };
+
+        // Recompress to .lz4.
+        let dest_path = Path::new(&out_dir).join("accents.tsv.lz4");
         let f = File::create(dest_path).unwrap();
         let mut encoder = lz4_flex::frame::FrameEncoder::new(f);
         encoder.write(&dict_data).unwrap();
