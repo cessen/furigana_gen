@@ -321,15 +321,11 @@ fn add_html_furigana(
             kana.into()
         };
 
-        let furigana_text = apply_furigana(surface, &kana, exclude_kanji);
+        let furigana_text = apply_furigana(surface, &kana, pitches, exclude_kanji);
 
         if furigana_text.is_empty() {
             new_text.push_str(surface);
         } else {
-            for pitch in pitches {
-                new_text.push_str(&format!("<sup>{}</sup>", pitch));
-            }
-
             for (surf, furi) in furigana_text.iter() {
                 if furi.is_empty() {
                     new_text.push_str(surf);
@@ -355,9 +351,10 @@ fn add_html_furigana(
 fn apply_furigana<'a>(
     surface: &'a str,
     kana: &'a str,
+    pitches: &[u8],
     exclude_kanji: &FnvHashSet<char>,
-) -> Vec<(&'a str, &'a str)> {
-    let mut out = Vec::new();
+) -> Vec<(&'a str, String)> {
+    let mut out: Vec<(&str, String)> = Vec::new();
 
     if furigana_unneeded(surface, exclude_kanji) || !is_kana_str(kana) {
         return Vec::new();
@@ -378,7 +375,7 @@ fn apply_furigana<'a>(
                 break;
             }
         }
-        out.push((&surface[..start_s], ""));
+        out.push((&surface[..start_s], "".into()));
         surface = &surface[start_s..];
         kana = &kana[start_k..];
     }
@@ -395,7 +392,7 @@ fn apply_furigana<'a>(
                 break;
             }
         }
-        out.push((&surface[end_s..], ""));
+        out.push((&surface[end_s..], "".into()));
         surface = &surface[..end_s];
         kana = &kana[..end_k];
     }
@@ -420,16 +417,40 @@ fn apply_furigana<'a>(
             .unwrap();
 
         // Insert the segments.
-        out.insert(out.len() - 2, (&surface[..si], &kana[..ki]));
-        out.insert(out.len() - 2, (&surface[si..(si + sc.len_utf8())], ""));
+        out.insert(out.len() - 2, (&surface[..si], kana[..ki].into()));
+        out.insert(
+            out.len() - 2,
+            (&surface[si..(si + sc.len_utf8())], "".into()),
+        );
         surface = &surface[(si + sc.len_utf8())..];
         kana = &kana[(ki + kc.len_utf8())..];
     }
 
     // Left over.
-    out.insert(out.len() - 1, (surface, kana));
+    out.insert(out.len() - 1, (surface, kana.into()));
+    out.retain(|(s, _)| !s.is_empty());
 
-    out.iter().filter(|(s, _)| !s.is_empty()).copied().collect()
+    // Attach pitch accent indicator(s) if we have any.
+    if !pitches.is_empty() && pitches[0] <= 9 {
+        let last = out.last_mut().unwrap();
+        last.1.push_str("<span class=\"pitch\">");
+        last.1.push(match pitches[0] {
+            0 => '０',
+            1 => '１',
+            2 => '２',
+            3 => '３',
+            4 => '４',
+            5 => '５',
+            6 => '６',
+            7 => '７',
+            8 => '８',
+            9 => '９',
+            _ => unreachable!(),
+        });
+        last.1.push_str("</span>");
+    }
+
+    out
 }
 
 /// Due to the way this is used, this isn't meant to be exact, but instead
@@ -563,7 +584,7 @@ mod tests {
     fn apply_furigana_01() {
         let surface = "へぇ";
         let kana = "ヘー";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
 
         assert!(pairs.is_empty());
     }
@@ -572,7 +593,7 @@ mod tests {
     fn apply_furigana_02() {
         let surface = "へぇー";
         let kana = "ヘー";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
 
         assert!(pairs.is_empty());
     }
@@ -581,7 +602,7 @@ mod tests {
     fn apply_furigana_03() {
         let surface = "へ";
         let kana = "え";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
 
         assert!(pairs.is_empty());
     }
@@ -590,19 +611,24 @@ mod tests {
     fn apply_furigana_04() {
         let surface = "食べる";
         let kana = "タベル";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
 
-        assert_eq!(&[("食", "タ"), ("べる", "")], &pairs[..]);
+        assert_eq!(&[("食", "タ".into()), ("べる", "".into())], &pairs[..]);
     }
 
     #[test]
     fn apply_furigana_05() {
         let surface = "流れ出す";
         let kana = "ながれだす";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
 
         assert_eq!(
-            &[("流", "なが"), ("れ", ""), ("出", "だ"), ("す", "")],
+            &[
+                ("流", "なが".into()),
+                ("れ", "".into()),
+                ("出", "だ".into()),
+                ("す", "".into())
+            ],
             &pairs[..]
         );
     }
@@ -611,18 +637,18 @@ mod tests {
     fn apply_furigana_06() {
         let surface = "物の怪";
         let kana = "もののけ";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
 
-        assert_eq!(&[("物の怪", "もののけ")], &pairs[..]);
+        assert_eq!(&[("物の怪", "もののけ".into())], &pairs[..]);
     }
 
     #[test]
     fn apply_furigana_07() {
         let surface = "ご飯";
         let kana = "ゴハン";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
 
-        assert_eq!(&[("ご", ""), ("飯", "ハン")], &pairs[..]);
+        assert_eq!(&[("ご", "".into()), ("飯", "ハン".into())], &pairs[..]);
     }
 
     #[test]
@@ -699,7 +725,7 @@ mod tests {
         );
         assert_eq!(
             furi_2,
-            r#"<sup class="食う"><sup>2</sup><ruby>食<rt>タ</rt></ruby>べる</sup>のは<ruby>良</ruby>いね！<hi />"#
+            r#"<sup class="食う"><ruby>食<rt>タ</rt></ruby><ruby>べる<rt><span class="pitch">２</span></rt></ruby></sup>のは<ruby>良</ruby>いね！<hi />"#
         );
     }
 
@@ -715,13 +741,13 @@ mod tests {
         );
         assert_eq!(
             gen_accent.add_html_furigana("額"),
-            "<sup>0</sup><ruby>額<rt>ヒタイ</rt></ruby>"
+            "<ruby>額<rt>ヒタイ<span class=\"pitch\">０</span></rt></ruby>"
         );
 
         assert_eq!(gen.add_html_furigana("他"), "<ruby>他<rt>ホカ</rt></ruby>");
         assert_eq!(
             gen_accent.add_html_furigana("他"),
-            "<sup>0</sup><ruby>他<rt>ホカ</rt></ruby>"
+            "<ruby>他<rt>ホカ<span class=\"pitch\">０</span></rt></ruby>"
         );
 
         assert_eq!(
@@ -730,7 +756,7 @@ mod tests {
         );
         assert_eq!(
             gen_accent.add_html_furigana("私"),
-            "<sup>0</sup><ruby>私<rt>ワタシ</rt></ruby>"
+            "<ruby>私<rt>ワタシ<span class=\"pitch\">０</span></rt></ruby>"
         );
     }
 }
