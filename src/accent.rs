@@ -59,3 +59,36 @@ impl AccentDict {
         }
     }
 }
+
+/// Computes the byte index of the character in kana that corresponds to the
+/// given pitch accent number.
+pub fn accent_number_to_byte_idx(kana: &str, accent_number: u8) -> Option<usize> {
+    if accent_number == 0 {
+        return None;
+    }
+
+    let target = accent_number - 1;
+    let mut current = 0;
+    let mut byte_idx = 0;
+
+    let mut iter = kana.chars().peekable();
+    while let Some(c) = iter.next() {
+        if current == target {
+            break;
+        }
+
+        let next_is_mod = match iter.peek() {
+            Some('ゃ') | Some('ゅ') | Some('ょ') | Some('ャ') | Some('ュ') | Some('ョ') => {
+                true
+            }
+            _ => false,
+        };
+        if next_is_mod {
+            current += 1;
+        }
+
+        byte_idx += c.len_utf8();
+    }
+
+    return Some(byte_idx);
+}
