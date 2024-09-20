@@ -23,18 +23,22 @@ const DICT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/system.dic.lz4"));
 /// A list of words that the tokenizer insists on using the less common reading
 /// for, with the more common reading that should be substituted.
 ///
-/// (surface, kana, substitute_kana)
-const COMMON_SUBS: &[(&str, &str, &str)] = &[
-    ("額", "ガク", "ヒタイ"),
-    ("他", "タ", "ホカ"),
-    ("私", "ワタクシ", "ワタシ"),
+/// (surface, kana, (substitute_kana, substitute_pitch_lookup_kana))
+const COMMON_SUBS: &[(&str, &str, (&str, &str))] = &[
+    ("額", "ガク", ("ヒタイ", "ヒタイ")),
+    ("他", "タ", ("ホカ", "ホカ")),
+    ("私", "ワタクシ", ("ワタシ", "ワタシ")),
+    ("等", "トー", ("ナド", "ナド")),
+    ("大分", "オーイタ", ("ダイブ", "ダイブ")),
+    ("日本", "ニッポン", ("ニホン", "ニホン")),
+    ("日本人", "ニッポンジン", ("ニホンジン", "ニホンジン")),
 ];
 
 pub struct FuriganaGenerator {
     tokenizer: Tokenizer,
     accent_dict: AccentDict,
     exclude_kanji: FnvHashSet<char>,
-    subs: FnvHashMap<(Cow<'static, str>, Cow<'static, str>), String>,
+    subs: FnvHashMap<(Cow<'static, str>, Cow<'static, str>), (String, String)>,
     use_hiragana: bool,
     mark_accent: bool,
 }
@@ -65,9 +69,12 @@ impl FuriganaGenerator {
         };
 
         let subs = {
-            let mut map: FnvHashMap<(Cow<str>, Cow<str>), String> = FnvHashMap::default();
-            for (surface, feature, sub_feature) in COMMON_SUBS.iter().copied() {
-                map.insert((surface.into(), feature.into()), sub_feature.into());
+            let mut map: FnvHashMap<(Cow<str>, Cow<str>), (String, String)> = FnvHashMap::default();
+            for (surface, kana, (sub_kana, sub_kana_pitch_lookup)) in COMMON_SUBS.iter().copied() {
+                map.insert(
+                    (surface.into(), kana.into()),
+                    (sub_kana.into(), sub_kana_pitch_lookup.into()),
+                );
             }
             map
         };
@@ -99,7 +106,7 @@ pub struct Session<'a> {
     tokenizer: &'a Tokenizer,
     accent_dict: &'a AccentDict,
     exclude_kanji: &'a FnvHashSet<char>,
-    subs: &'a FnvHashMap<(Cow<'a, str>, Cow<'a, str>), String>,
+    subs: &'a FnvHashMap<(Cow<'a, str>, Cow<'a, str>), (String, String)>,
     learner: Learner,
     use_hiragana: bool,
     mark_accent: bool,
@@ -143,7 +150,7 @@ fn add_html_furigana_skip_already_ruby(
     tokenizer: &Tokenizer,
     accent_dict: &AccentDict,
     exclude_kanji: &FnvHashSet<char>,
-    subs: &FnvHashMap<(Cow<str>, Cow<str>), String>,
+    subs: &FnvHashMap<(Cow<str>, Cow<str>), (String, String)>,
     learner: &mut Learner,
     use_hiragana: bool,
     mark_accent: bool,
@@ -270,7 +277,7 @@ fn add_html_furigana(
     tokenizer: &Tokenizer,
     accent_dict: &AccentDict,
     exclude_kanji: &FnvHashSet<char>,
-    subs: &FnvHashMap<(Cow<str>, Cow<str>), String>,
+    subs: &FnvHashMap<(Cow<str>, Cow<str>), (String, String)>,
     learner: &mut Learner,
     use_hiragana: bool,
     mark_accent: bool,
@@ -291,15 +298,16 @@ fn add_html_furigana(
             let kana_2 = feature.rsplit(",").nth(1).unwrap();
             let word = feature.rsplit(",").nth(2).unwrap();
 
-            let (kana, pkana) =
-                if let Some(sub_kana) = subs.get(&(Cow::from(surface), Cow::from(kana_1))) {
-                    (sub_kana.as_str(), sub_kana.as_str())
-                } else {
-                    (kana_1, kana_2)
-                };
+            let (kana, pitch_kana) = if let Some((sub_kana, sub_pitch_kana)) =
+                subs.get(&(Cow::from(surface), Cow::from(kana_1)))
+            {
+                (sub_kana.as_str(), sub_pitch_kana.as_str())
+            } else {
+                (kana_1, kana_2)
+            };
 
             let pitches = if mark_accent {
-                accent_dict.get(word, pkana)
+                accent_dict.get(word, pitch_kana)
             } else {
                 &[]
             };
@@ -756,6 +764,27 @@ mod tests {
         assert_eq!(
             gen_accent.add_html_furigana("私"),
             "<ruby>私<rt>ワタシ<span class=\"pitch\">０</span></rt></ruby>"
+        );
+
+        // The added 卵 is to trigger the parse we're testing of 等.
+        assert_eq!(
+            gen.add_html_furigana("卵等"),
+            "<ruby>卵<rt>タマゴ</rt></ruby><ruby>等<rt>ナド</rt></ruby>"
+        );
+
+        assert_eq!(
+            gen.add_html_furigana("大分"),
+            "<ruby>大分<rt>ダイブ</rt></ruby>"
+        );
+
+        assert_eq!(
+            gen.add_html_furigana("日本"),
+            "<ruby>日本<rt>ニホン</rt></ruby>"
+        );
+
+        assert_eq!(
+            gen.add_html_furigana("日本人"),
+            "<ruby>日本人<rt>ニホンジン</rt></ruby>"
         );
     }
 }
