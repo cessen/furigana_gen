@@ -1,23 +1,27 @@
-use std::collections::HashMap;
+use fnv::FnvHashMap;
 
 const LEARN_RATE: f64 = 0.7;
-const MIN_MAX_DISTANCE: usize = 10;
-const MAX_MAX_DISTANCE: usize = 75000;
+const MAX_DISTANCE_FLOOR: usize = 15;
+const MAX_DISTANCE_CEILING: usize = 100000;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct WordStats {
-    // The last position (in words processed) that this word was seen at.
+    // The last position (in characters processed) that this word was seen at.
     last_seen_at: usize,
+
+    // The last position (in characters processed) that this word had help.
+    last_helped_at: usize,
 
     // How many times this word has been seen so far.
     pub times_seen: usize,
 
-    // Maximum distance before helps is needed again.
+    // Maximum distance (in characters) before help is needed again.
     pub max_distance: usize,
 }
 
 pub struct Learner {
-    stats: HashMap<String, WordStats>,
+    stats: FnvHashMap<String, WordStats>,
+    chars_processed: usize,
     words_processed: usize,
     times_seen_threshold: usize,
 }
@@ -25,7 +29,8 @@ pub struct Learner {
 impl Learner {
     pub fn new(times_seen_threshold: usize) -> Self {
         Self {
-            stats: HashMap::new(),
+            stats: FnvHashMap::default(),
+            chars_processed: 0,
             words_processed: 0,
             times_seen_threshold: times_seen_threshold,
         }
@@ -46,45 +51,60 @@ impl Learner {
         (self.words_processed, stats)
     }
 
-    pub fn record(&mut self, word: &str) {
-        if self.times_seen_threshold == usize::MAX {
-            return;
-        }
-
-        self.stats
-            .entry(word.to_string())
-            .and_modify(|stats| {
-                let distance = self.words_processed - stats.last_seen_at;
-
-                stats.last_seen_at = self.words_processed;
-                stats.times_seen += 1;
-                if stats.times_seen <= self.times_seen_threshold {
-                    return;
-                }
-
-                stats.max_distance +=
-                    distance.min((stats.max_distance as f64 * LEARN_RATE) as usize);
-
-                stats.max_distance = stats.max_distance.min(MAX_MAX_DISTANCE);
-            })
-            .or_insert(WordStats {
-                last_seen_at: self.words_processed,
-                times_seen: 1,
-                max_distance: MIN_MAX_DISTANCE,
-            });
-        self.words_processed += 1;
-    }
-
-    pub fn needs_help(&self, word: &str) -> bool {
+    /// Processes a word, and returns whether it needs help or not.
+    pub fn process(&mut self, word: &str) -> bool {
         if self.times_seen_threshold == usize::MAX {
             return true;
         }
 
-        if let Some(stats) = self.stats.get(word) {
-            let distance = self.words_processed - stats.last_seen_at;
-            stats.times_seen <= self.times_seen_threshold || distance > stats.max_distance
+        // Get word stats entry.
+        let word_stats = if let Some(word_stats) = self.stats.get_mut(word) {
+            word_stats
         } else {
-            true
+            self.stats.insert(
+                word.into(),
+                WordStats {
+                    last_seen_at: 0,
+                    last_helped_at: 0,
+                    times_seen: 0,
+                    max_distance: MAX_DISTANCE_FLOOR,
+                },
+            );
+            self.stats.get_mut(word).unwrap()
+        };
+
+        // Determine if help is needed.
+        let help = {
+            let help_distance = self.chars_processed - word_stats.last_helped_at;
+            word_stats.times_seen <= self.times_seen_threshold
+                || help_distance > word_stats.max_distance
+        };
+
+        // Update word stats.
+        {
+            let seen_distance = self.chars_processed - word_stats.last_seen_at;
+
+            word_stats.last_seen_at = self.chars_processed;
+            if help {
+                word_stats.last_helped_at = self.chars_processed;
+            }
+            word_stats.times_seen += 1;
+
+            if word_stats.times_seen > self.times_seen_threshold {
+                word_stats.max_distance +=
+                    seen_distance.min((word_stats.max_distance as f64 * LEARN_RATE) as usize);
+
+                // Clamp to floor/ceiling.
+                word_stats.max_distance = word_stats
+                    .max_distance
+                    .clamp(MAX_DISTANCE_FLOOR, MAX_DISTANCE_CEILING);
+            }
         }
+
+        // Update position.
+        self.chars_processed += word.chars().count();
+        self.words_processed += 1;
+
+        return help;
     }
 }

@@ -307,8 +307,7 @@ fn add_html_furigana(
             (surface, kana, pitches)
         };
 
-        let needs_help = learner.needs_help(surface);
-        learner.record(surface);
+        let needs_help = learner.process(surface);
 
         if !needs_help {
             new_text.push_str(surface);
