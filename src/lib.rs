@@ -437,19 +437,30 @@ fn apply_furigana<'a>(
     out.insert(out.len() - 1, (surface.into(), kana.into()));
     out.retain(|(s, _)| !s.is_empty());
 
-    // Attach pitch accent indicator if we have any.
-    if !pitches.is_empty() && pitches[0] > 0 {
-        let mut byte_idx = accent::accent_number_to_byte_idx(kana, pitches[0]).unwrap();
-        for (ref mut s, ref mut k) in out.iter_mut() {
+    // Attach pitch accent indicator if there is one and it's unambiguous.
+    if pitches.len() == 1 {
+        if pitches[0] == 0 {
+            // 平板.
+            let (s, k) = out.last_mut().unwrap();
             let text = if k.is_empty() { s } else { k };
-            if byte_idx < text.len()
-                && text.is_char_boundary(byte_idx)
-                && text.is_char_boundary(byte_idx + 3)
-            {
-                text.insert_str(byte_idx + 3, "</span>");
-                text.insert_str(byte_idx, "<span class=\"pitch_accent\">");
+            if text.len() >= 3 && text.is_char_boundary(text.len() - 3) {
+                text.insert_str(text.len() - 3, "<span class=\"pitch_flat\">");
+                text.insert_str(text.len(), "</span>");
             }
-            byte_idx -= text.len();
+        } else {
+            // Everything else.
+            let mut byte_idx = accent::accent_number_to_byte_idx(kana, pitches[0]).unwrap();
+            for (s, k) in out.iter_mut() {
+                let text = if k.is_empty() { s } else { k };
+                if byte_idx < text.len()
+                    && text.is_char_boundary(byte_idx)
+                    && text.is_char_boundary(byte_idx + 3)
+                {
+                    text.insert_str(byte_idx + 3, "</span>");
+                    text.insert_str(byte_idx, "<span class=\"pitch_accent\">");
+                }
+                byte_idx -= text.len();
+            }
         }
     }
 
@@ -742,14 +753,9 @@ mod tests {
     #[test]
     fn add_html_furigana_02() {
         let mut gen = get_furigana_gen().new_session(false);
-        let mut gen_accent = get_furigana_gen_with_accent().new_session(false);
 
         assert_eq!(
             gen.add_html_furigana("額"),
-            r#"<ruby>額<rt>ヒタイ</rt></ruby>"#
-        );
-        assert_eq!(
-            gen_accent.add_html_furigana("額"),
             r#"<ruby>額<rt>ヒタイ</rt></ruby>"#
         );
 
@@ -757,17 +763,9 @@ mod tests {
             gen.add_html_furigana("他"),
             r#"<ruby>他<rt>ホカ</rt></ruby>"#
         );
-        assert_eq!(
-            gen_accent.add_html_furigana("他"),
-            r#"<ruby>他<rt>ホカ</rt></ruby>"#
-        );
 
         assert_eq!(
             gen.add_html_furigana("私"),
-            r#"<ruby>私<rt>ワタシ</rt></ruby>"#
-        );
-        assert_eq!(
-            gen_accent.add_html_furigana("私"),
             r#"<ruby>私<rt>ワタシ</rt></ruby>"#
         );
 
@@ -776,17 +774,9 @@ mod tests {
             gen.add_html_furigana("卵等"),
             r#"<ruby>卵<rt>タマゴ</rt></ruby><ruby>等<rt>ナド</rt></ruby>"#
         );
-        assert_eq!(
-            gen_accent.add_html_furigana("卵等"),
-            r#"<ruby>卵<rt>タマゴ</rt></ruby><ruby>等<rt><span class="pitch_accent">ナ</span>ド</rt></ruby>"#
-        );
 
         assert_eq!(
             gen.add_html_furigana("大分"),
-            r#"<ruby>大分<rt>ダイブ</rt></ruby>"#
-        );
-        assert_eq!(
-            gen_accent.add_html_furigana("大分"),
             r#"<ruby>大分<rt>ダイブ</rt></ruby>"#
         );
 
@@ -794,18 +784,76 @@ mod tests {
             gen.add_html_furigana("日本"),
             r#"<ruby>日本<rt>ニホン</rt></ruby>"#
         );
-        assert_eq!(
-            gen_accent.add_html_furigana("日本"),
-            r#"<ruby>日本<rt>ニホン</rt></ruby>"#
-        );
 
         assert_eq!(
             gen.add_html_furigana("日本人"),
             r#"<ruby>日本人<rt>ニホンジン</rt></ruby>"#
         );
+    }
+
+    // Testing accent markers.
+    #[test]
+    fn add_html_furigana_03() {
+        let mut gen = get_furigana_gen_with_accent().new_session(false);
+
+        // Ichidan verb.  Should only get pitch accent marking in full dictionary form.
         assert_eq!(
-            gen_accent.add_html_furigana("日本人"),
-            r#"<ruby>日本人<rt>ニホンジン</rt></ruby>"#
+            gen.add_html_furigana("食べる"),
+            r#"<ruby>食<rt>タ</rt></ruby><span class="pitch_accent">べ</span>る"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("食べます"),
+            r#"<ruby>食<rt>タ</rt></ruby>べます"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("食べ"),
+            r#"<ruby>食<rt>タ</rt></ruby>べ"#
+        );
+
+        // Godan verb.  Should only get pitch accent marking in full dictionary form.
+        assert_eq!(
+            gen.add_html_furigana("泳ぐ"),
+            r#"<ruby>泳<rt>オ<span class="pitch_accent">ヨ</span></rt></ruby>ぐ"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("泳が"),
+            r#"<ruby>泳<rt>オヨ</rt></ruby>が"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("泳ぎます"),
+            r#"<ruby>泳<rt>オヨ</rt></ruby>ぎます"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("泳ぎ"),
+            r#"<ruby>泳<rt>オヨ</rt></ruby><span class="pitch_accent">ぎ</span>"#
+        );
+
+        // I-adjective.  Should only get pitch accent marking in full dictionary form.
+        assert_eq!(
+            gen.add_html_furigana("早い"),
+            r#"<ruby>早<rt>ハ<span class="pitch_accent">ヤ</span></rt></ruby>い"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("早く"),
+            r#"<ruby>早<rt>ハヤ</rt></ruby>く"#
+        );
+
+        // Other. Should always get pitch accent markings.
+        assert_eq!(
+            gen.add_html_furigana("少し"),
+            r#"<ruby>少<rt>ス<span class="pitch_accent">コ</span></rt></ruby>し"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("綺麗"),
+            r#"<ruby>綺麗<rt><span class="pitch_accent">キ</span>レイ</rt></ruby>"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("平板"),
+            r#"<ruby>平板<rt>ヘイバ<span class="pitch_flat">ン</span></rt></ruby>"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("他"),
+            r#"<ruby>他<rt>ホ<span class="pitch_flat">カ</span></rt></ruby>"#
         );
     }
 }

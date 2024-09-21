@@ -83,7 +83,7 @@ pub fn accent_number_to_byte_idx(kana: &str, accent_number: u8) -> Option<usize>
             }
             _ => false,
         };
-        if next_is_mod {
+        if !next_is_mod {
             current += 1;
         }
 
