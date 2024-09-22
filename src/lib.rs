@@ -28,7 +28,6 @@ const COMMON_SUBS: &[(&str, &str, (&str, &str))] = &[
     ("額", "ガク", ("ヒタイ", "ヒタイ")),
     ("他", "タ", ("ホカ", "ホカ")),
     ("私", "ワタクシ", ("ワタシ", "ワタシ")),
-    ("等", "トー", ("ナド", "ナド")),
     ("大分", "オーイタ", ("ダイブ", "ダイブ")),
     ("日本", "ニッポン", ("ニホン", "ニホン")),
     ("日本人", "ニッポンジン", ("ニホンジン", "ニホンジン")),
@@ -767,12 +766,6 @@ mod tests {
         assert_eq!(
             gen.add_html_furigana("私"),
             r#"<ruby>私<rt>ワタシ</rt></ruby>"#
-        );
-
-        // The added 卵 is to trigger the parse we're testing of 等.
-        assert_eq!(
-            gen.add_html_furigana("卵等"),
-            r#"<ruby>卵<rt>タマゴ</rt></ruby><ruby>等<rt>ナド</rt></ruby>"#
         );
 
         assert_eq!(
