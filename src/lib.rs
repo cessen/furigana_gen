@@ -441,22 +441,45 @@ fn apply_furigana<'a>(
         if pitches[0] == 0 {
             // 平板.
             let (s, k) = out.last_mut().unwrap();
+            let mark = if k.is_empty() {
+                // If we're putting this on a non-furigana character, add an
+                // extra level of furigana to make the formatting consistent.
+                &[
+                    "<ruby>",
+                    "<rt><ruby class=\"pitch_flat\">　<rt>o</rt></ruby></rt></ruby>",
+                ]
+            } else {
+                &["<ruby class=\"pitch_flat\">", "<rt>o</rt></ruby>"]
+            };
             let text = if k.is_empty() { s } else { k };
+
             if text.len() >= 3 && text.is_char_boundary(text.len() - 3) {
-                text.insert_str(text.len() - 3, "<span class=\"pitch_flat\">");
-                text.insert_str(text.len(), "</span>");
+                text.insert_str(text.len() - 3, mark[0]);
+                text.insert_str(text.len(), mark[1]);
             }
         } else {
             // Everything else.
             let mut byte_idx = accent::accent_number_to_byte_idx(kana, pitches[0]).unwrap();
             for (s, k) in out.iter_mut() {
+                let mark = if k.is_empty() {
+                    // If we're putting this on a non-furigana character, add an
+                    // extra level of furigana to make the formatting consistent.
+                    &[
+                        "<ruby>",
+                        "<rt><ruby class=\"pitch_accent\">　<rt>＊</rt></ruby></rt></ruby>",
+                    ]
+                } else {
+                    &["<ruby class=\"pitch_accent\">", "<rt>＊</rt></ruby>"]
+                };
                 let text = if k.is_empty() { s } else { k };
+
                 if byte_idx < text.len()
                     && text.is_char_boundary(byte_idx)
                     && text.is_char_boundary(byte_idx + 3)
                 {
-                    text.insert_str(byte_idx + 3, "</span>");
-                    text.insert_str(byte_idx, "<span class=\"pitch_accent\">");
+                    text.insert_str(byte_idx + 3, mark[1]);
+                    text.insert_str(byte_idx, mark[0]);
+                    break;
                 }
                 byte_idx -= text.len();
             }
@@ -744,7 +767,7 @@ mod tests {
         );
         assert_eq!(
             furi_2,
-            r#"<sup class="食う"><ruby>食<rt>タ</rt></ruby><span class="pitch_accent">べ</span>る</sup>のは<ruby>良</ruby>いね！<hi />"#
+            r#"<sup class="食う"><ruby>食<rt>タ</rt></ruby><ruby>べ<rt><ruby class="pitch_accent">　<rt>＊</rt></ruby></rt></ruby>る</sup>のは<ruby>良</ruby>いね！<hi />"#
         );
     }
 
@@ -792,7 +815,7 @@ mod tests {
         // Ichidan verb.  Should only get pitch accent marking in full dictionary form.
         assert_eq!(
             gen.add_html_furigana("食べる"),
-            r#"<ruby>食<rt>タ</rt></ruby><span class="pitch_accent">べ</span>る"#
+            r#"<ruby>食<rt>タ</rt></ruby><ruby>べ<rt><ruby class="pitch_accent">　<rt>＊</rt></ruby></rt></ruby>る"#
         );
         assert_eq!(
             gen.add_html_furigana("食べます"),
@@ -806,7 +829,7 @@ mod tests {
         // Godan verb.  Should only get pitch accent marking in full dictionary form.
         assert_eq!(
             gen.add_html_furigana("泳ぐ"),
-            r#"<ruby>泳<rt>オ<span class="pitch_accent">ヨ</span></rt></ruby>ぐ"#
+            r#"<ruby>泳<rt>オ<ruby class="pitch_accent">ヨ<rt>＊</rt></ruby></rt></ruby>ぐ"#
         );
         assert_eq!(
             gen.add_html_furigana("泳が"),
@@ -818,13 +841,13 @@ mod tests {
         );
         assert_eq!(
             gen.add_html_furigana("泳ぎ"),
-            r#"<ruby>泳<rt>オヨ</rt></ruby><span class="pitch_accent">ぎ</span>"#
+            r#"<ruby>泳<rt>オヨ</rt></ruby><ruby>ぎ<rt><ruby class="pitch_accent">　<rt>＊</rt></ruby></rt></ruby>"#
         );
 
         // I-adjective.  Should only get pitch accent marking in full dictionary form.
         assert_eq!(
             gen.add_html_furigana("早い"),
-            r#"<ruby>早<rt>ハ<span class="pitch_accent">ヤ</span></rt></ruby>い"#
+            r#"<ruby>早<rt>ハ<ruby class="pitch_accent">ヤ<rt>＊</rt></ruby></rt></ruby>い"#
         );
         assert_eq!(
             gen.add_html_furigana("早く"),
@@ -834,19 +857,23 @@ mod tests {
         // Other. Should always get pitch accent markings.
         assert_eq!(
             gen.add_html_furigana("少し"),
-            r#"<ruby>少<rt>ス<span class="pitch_accent">コ</span></rt></ruby>し"#
+            r#"<ruby>少<rt>ス<ruby class="pitch_accent">コ<rt>＊</rt></ruby></rt></ruby>し"#
         );
         assert_eq!(
             gen.add_html_furigana("綺麗"),
-            r#"<ruby>綺麗<rt><span class="pitch_accent">キ</span>レイ</rt></ruby>"#
+            r#"<ruby>綺麗<rt><ruby class="pitch_accent">キ<rt>＊</rt></ruby>レイ</rt></ruby>"#
         );
         assert_eq!(
             gen.add_html_furigana("平板"),
-            r#"<ruby>平板<rt>ヘイバ<span class="pitch_flat">ン</span></rt></ruby>"#
+            r#"<ruby>平板<rt>ヘイバ<ruby class="pitch_flat">ン<rt>o</rt></ruby></rt></ruby>"#
         );
         assert_eq!(
             gen.add_html_furigana("他"),
-            r#"<ruby>他<rt>ホ<span class="pitch_flat">カ</span></rt></ruby>"#
+            r#"<ruby>他<rt>ホ<ruby class="pitch_flat">カ<rt>o</rt></ruby></rt></ruby>"#
+        );
+        assert_eq!(
+            gen.add_html_furigana("中"),
+            r#"<ruby>中<rt><ruby class="pitch_accent">ナ<rt>＊</rt></ruby>カ</rt></ruby>"#
         );
     }
 }
