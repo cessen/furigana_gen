@@ -39,7 +39,8 @@ pub struct FuriganaGenerator {
     exclude_kanji: FnvHashSet<char>,
     subs: FnvHashMap<(Cow<'static, str>, Cow<'static, str>), (String, String)>,
     use_hiragana: bool,
-    mark_accent: bool,
+    accent_mark: Option<String>,
+    accentless_mark: Option<String>,
 }
 
 impl FuriganaGenerator {
@@ -47,7 +48,12 @@ impl FuriganaGenerator {
     // Specifically, words made up *entirely* of those kanji will be excluded.
     // If a word has some kanji that aren't in that set, even if it also has
     // some that are, it will still get furigana.
-    pub fn new(exclude_count: usize, use_hiragana: bool, mark_accent: bool) -> Self {
+    pub fn new(
+        exclude_count: usize,
+        use_hiragana: bool,
+        accent_mark: Option<String>,
+        accentless_mark: Option<String>,
+    ) -> Self {
         let dict = {
             // Note: we could just pass the decoder straight to `Dictionary::read()`
             // below, and it would work.  However, that ends up being slower than
@@ -84,7 +90,8 @@ impl FuriganaGenerator {
             exclude_kanji: exclude_kanji,
             subs: subs,
             use_hiragana: use_hiragana,
-            mark_accent: mark_accent,
+            accent_mark: accent_mark,
+            accentless_mark: accentless_mark,
         }
     }
 
@@ -96,7 +103,8 @@ impl FuriganaGenerator {
             subs: &self.subs,
             learner: Learner::new(if learn_mode { 3 } else { usize::MAX }),
             use_hiragana: self.use_hiragana,
-            mark_accent: self.mark_accent,
+            accent_mark: self.accent_mark.as_ref().map(|s| s.as_str()),
+            accentless_mark: self.accentless_mark.as_ref().map(|s| s.as_str()),
         }
     }
 }
@@ -108,7 +116,8 @@ pub struct Session<'a> {
     subs: &'a FnvHashMap<(Cow<'a, str>, Cow<'a, str>), (String, String)>,
     learner: Learner,
     use_hiragana: bool,
-    mark_accent: bool,
+    accent_mark: Option<&'a str>,
+    accentless_mark: Option<&'a str>,
 }
 
 impl<'a> Session<'a> {
@@ -134,7 +143,8 @@ impl<'a> Session<'a> {
             &self.subs,
             &mut self.learner,
             self.use_hiragana,
-            self.mark_accent,
+            self.accent_mark,
+            self.accentless_mark,
         )
     }
 }
@@ -152,7 +162,8 @@ fn add_html_furigana_skip_already_ruby(
     subs: &FnvHashMap<(Cow<str>, Cow<str>), (String, String)>,
     learner: &mut Learner,
     use_hiragana: bool,
-    mark_accent: bool,
+    accent_mark: Option<&str>,
+    accentless_mark: Option<&str>,
 ) -> String {
     let mut reader = quick_xml::Reader::from_str(text);
 
@@ -193,7 +204,8 @@ fn add_html_furigana_skip_already_ruby(
                         subs,
                         learner,
                         use_hiragana,
-                        mark_accent,
+                        accent_mark,
+                        accentless_mark,
                     ));
                 } else {
                     write_xml(&mut new_text, &Event::Text(e));
@@ -279,7 +291,8 @@ fn add_html_furigana(
     subs: &FnvHashMap<(Cow<str>, Cow<str>), (String, String)>,
     learner: &mut Learner,
     use_hiragana: bool,
-    mark_accent: bool,
+    accent_mark: Option<&str>,
+    accentless_mark: Option<&str>,
 ) -> String {
     let mut worker = tokenizer.new_worker();
 
@@ -305,7 +318,7 @@ fn add_html_furigana(
                 (kana_1, kana_2)
             };
 
-            let pitches = if mark_accent {
+            let pitches = if accent_mark.is_some() || accentless_mark.is_some() {
                 accent_dict.get(word, pitch_kana)
             } else {
                 &[]
@@ -327,7 +340,14 @@ fn add_html_furigana(
             kana.into()
         };
 
-        let furigana_text = apply_furigana(surface, &kana, pitches, exclude_kanji);
+        let furigana_text = apply_furigana(
+            surface,
+            &kana,
+            exclude_kanji,
+            pitches,
+            accent_mark,
+            accentless_mark,
+        );
 
         if furigana_text.is_empty() {
             new_text.push_str(surface);
@@ -357,8 +377,10 @@ fn add_html_furigana(
 fn apply_furigana<'a>(
     surface: &'a str,
     kana: &'a str,
-    pitches: &[u8],
     exclude_kanji: &FnvHashSet<char>,
+    pitches: &[u8],
+    accent_mark: Option<&'a str>,
+    accentless_mark: Option<&'a str>,
 ) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
 
@@ -438,7 +460,7 @@ fn apply_furigana<'a>(
 
     // Attach pitch accent indicator if there is one and it's unambiguous.
     if pitches.len() == 1 {
-        if pitches[0] == 0 {
+        if pitches[0] == 0 && accentless_mark.is_some() {
             // 平板.
             let (s, k) = out.last_mut().unwrap();
             let mark = if k.is_empty() {
@@ -446,18 +468,21 @@ fn apply_furigana<'a>(
                 // extra level of furigana to make the formatting consistent.
                 &[
                     "<ruby>",
-                    "<rt><ruby class=\"pitch_flat\">　<rt>o</rt></ruby></rt></ruby>",
+                    "<rt><ruby class=\"pitch_flat\">　<rt>",
+                    "</rt></ruby></rt></ruby>",
                 ]
             } else {
-                &["<ruby class=\"pitch_flat\">", "<rt>o</rt></ruby>"]
+                &["<ruby class=\"pitch_flat\">", "<rt>", "</rt></ruby>"]
             };
             let text = if k.is_empty() { s } else { k };
 
             if text.len() >= 3 && text.is_char_boundary(text.len() - 3) {
                 text.insert_str(text.len() - 3, mark[0]);
                 text.insert_str(text.len(), mark[1]);
+                text.insert_str(text.len(), accentless_mark.unwrap());
+                text.insert_str(text.len(), mark[2]);
             }
-        } else {
+        } else if accent_mark.is_some() {
             // Everything else.
             let mut byte_idx = accent::accent_number_to_byte_idx(kana, pitches[0]).unwrap();
             for (s, k) in out.iter_mut() {
@@ -466,10 +491,11 @@ fn apply_furigana<'a>(
                     // extra level of furigana to make the formatting consistent.
                     &[
                         "<ruby>",
-                        "<rt><ruby class=\"pitch_accent\">　<rt>＊</rt></ruby></rt></ruby>",
+                        "<rt><ruby class=\"pitch_accent\">　<rt>",
+                        "</rt></ruby></rt></ruby>",
                     ]
                 } else {
-                    &["<ruby class=\"pitch_accent\">", "<rt>＊</rt></ruby>"]
+                    &["<ruby class=\"pitch_accent\">", "<rt>", "</rt></ruby>"]
                 };
                 let text = if k.is_empty() { s } else { k };
 
@@ -477,6 +503,8 @@ fn apply_furigana<'a>(
                     && text.is_char_boundary(byte_idx)
                     && text.is_char_boundary(byte_idx + 3)
                 {
+                    text.insert_str(byte_idx + 3, mark[2]);
+                    text.insert_str(byte_idx + 3, accent_mark.unwrap());
                     text.insert_str(byte_idx + 3, mark[1]);
                     text.insert_str(byte_idx, mark[0]);
                     break;
@@ -608,19 +636,20 @@ mod tests {
     pub fn get_furigana_gen() -> &'static FuriganaGenerator {
         use std::sync::OnceLock;
         static FURIGEN: OnceLock<FuriganaGenerator> = OnceLock::new();
-        FURIGEN.get_or_init(|| FuriganaGenerator::new(0, false, false))
+        FURIGEN.get_or_init(|| FuriganaGenerator::new(0, false, None, None))
     }
     pub fn get_furigana_gen_with_accent() -> &'static FuriganaGenerator {
         use std::sync::OnceLock;
         static FURIGEN: OnceLock<FuriganaGenerator> = OnceLock::new();
-        FURIGEN.get_or_init(|| FuriganaGenerator::new(0, false, true))
+        FURIGEN
+            .get_or_init(|| FuriganaGenerator::new(0, false, Some("＊".into()), Some("o".into())))
     }
 
     #[test]
     fn apply_furigana_01() {
         let surface = "へぇ";
         let kana = "ヘー";
-        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
 
         assert!(pairs.is_empty());
     }
@@ -629,7 +658,7 @@ mod tests {
     fn apply_furigana_02() {
         let surface = "へぇー";
         let kana = "ヘー";
-        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
 
         assert!(pairs.is_empty());
     }
@@ -638,7 +667,7 @@ mod tests {
     fn apply_furigana_03() {
         let surface = "へ";
         let kana = "え";
-        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
 
         assert!(pairs.is_empty());
     }
@@ -647,7 +676,7 @@ mod tests {
     fn apply_furigana_04() {
         let surface = "食べる";
         let kana = "タベル";
-        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
 
         assert_eq!(
             &[("食".into(), "タ".into()), ("べる".into(), "".into())],
@@ -659,7 +688,7 @@ mod tests {
     fn apply_furigana_05() {
         let surface = "流れ出す";
         let kana = "ながれだす";
-        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
 
         assert_eq!(
             &[
@@ -676,7 +705,7 @@ mod tests {
     fn apply_furigana_06() {
         let surface = "物の怪";
         let kana = "もののけ";
-        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
 
         assert_eq!(&[("物の怪".into(), "もののけ".into())], &pairs[..]);
     }
@@ -685,7 +714,7 @@ mod tests {
     fn apply_furigana_07() {
         let surface = "ご飯";
         let kana = "ゴハン";
-        let pairs = apply_furigana(surface, kana, &[], &FnvHashSet::default());
+        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
 
         assert_eq!(
             &[("ご".into(), "".into()), ("飯".into(), "ハン".into())],
