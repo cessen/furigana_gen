@@ -37,6 +37,7 @@ pub struct FuriganaGenerator {
     tokenizer: Tokenizer,
     accent_dict: AccentDict,
     exclude_kanji: FnvHashSet<char>,
+    exclude_words: FnvHashSet<String>,
     subs: FnvHashMap<(Cow<'static, str>, Cow<'static, str>), (String, String)>,
     use_hiragana: bool,
     accent_mark: Option<String>,
@@ -44,12 +45,15 @@ pub struct FuriganaGenerator {
 }
 
 impl FuriganaGenerator {
-    // `exclude_count`: exclude the N most frequent kanji from furigana.
+    // - `exclude_count`: exclude the N most frequent kanji from furigana.
     // Specifically, words made up *entirely* of those kanji will be excluded.
     // If a word has some kanji that aren't in that set, even if it also has
     // some that are, it will still get furigana.
+    //
+    // - `exclude_words`: don't put furigana on the words in this list.
     pub fn new(
         exclude_count: usize,
+        exclude_words: &[&str],
         use_hiragana: bool,
         accent_mark: Option<String>,
         accentless_mark: Option<String>,
@@ -73,6 +77,14 @@ impl FuriganaGenerator {
             set
         };
 
+        let exclude_words = {
+            let mut set = FnvHashSet::default();
+            for word in exclude_words {
+                set.insert((*word).into());
+            }
+            set
+        };
+
         let subs = {
             let mut map: FnvHashMap<(Cow<str>, Cow<str>), (String, String)> = FnvHashMap::default();
             for (surface, kana, (sub_kana, sub_kana_pitch_lookup)) in COMMON_SUBS.iter().copied() {
@@ -88,6 +100,7 @@ impl FuriganaGenerator {
             tokenizer: Tokenizer::new(dict),
             accent_dict: accent::build_accent_dictionary(),
             exclude_kanji: exclude_kanji,
+            exclude_words: exclude_words,
             subs: subs,
             use_hiragana: use_hiragana,
             accent_mark: accent_mark,
@@ -100,6 +113,7 @@ impl FuriganaGenerator {
             tokenizer: &self.tokenizer,
             accent_dict: &self.accent_dict,
             exclude_kanji: &self.exclude_kanji,
+            exclude_words: &self.exclude_words,
             subs: &self.subs,
             learner: Learner::new(if learn_mode { 3 } else { usize::MAX }),
             use_hiragana: self.use_hiragana,
@@ -113,6 +127,7 @@ pub struct Session<'a> {
     tokenizer: &'a Tokenizer,
     accent_dict: &'a AccentDict,
     exclude_kanji: &'a FnvHashSet<char>,
+    exclude_words: &'a FnvHashSet<String>,
     subs: &'a FnvHashMap<(Cow<'a, str>, Cow<'a, str>), (String, String)>,
     learner: Learner,
     use_hiragana: bool,
@@ -140,6 +155,7 @@ impl<'a> Session<'a> {
             &self.tokenizer,
             &self.accent_dict,
             &self.exclude_kanji,
+            &self.exclude_words,
             &self.subs,
             &mut self.learner,
             self.use_hiragana,
@@ -159,6 +175,7 @@ fn add_html_furigana_skip_already_ruby(
     tokenizer: &Tokenizer,
     accent_dict: &AccentDict,
     exclude_kanji: &FnvHashSet<char>,
+    exclude_words: &FnvHashSet<String>,
     subs: &FnvHashMap<(Cow<str>, Cow<str>), (String, String)>,
     learner: &mut Learner,
     use_hiragana: bool,
@@ -201,6 +218,7 @@ fn add_html_furigana_skip_already_ruby(
                         tokenizer,
                         accent_dict,
                         exclude_kanji,
+                        exclude_words,
                         subs,
                         learner,
                         use_hiragana,
@@ -288,6 +306,7 @@ fn add_html_furigana(
     tokenizer: &Tokenizer,
     accent_dict: &AccentDict,
     exclude_kanji: &FnvHashSet<char>,
+    exclude_words: &FnvHashSet<String>,
     subs: &FnvHashMap<(Cow<str>, Cow<str>), (String, String)>,
     learner: &mut Learner,
     use_hiragana: bool,
@@ -344,6 +363,7 @@ fn add_html_furigana(
             surface,
             &kana,
             exclude_kanji,
+            exclude_words,
             pitches,
             accent_mark,
             accentless_mark,
@@ -378,13 +398,14 @@ fn apply_furigana<'a>(
     surface: &'a str,
     kana: &'a str,
     exclude_kanji: &FnvHashSet<char>,
+    exclude_words: &FnvHashSet<String>,
     pitches: &[u8],
     accent_mark: Option<&'a str>,
     accentless_mark: Option<&'a str>,
 ) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
 
-    if furigana_unneeded(surface, exclude_kanji) || !is_kana_str(kana) {
+    if furigana_unneeded(surface, exclude_kanji, exclude_words) || !is_kana_str(kana) {
         return Vec::new();
     }
 
@@ -584,10 +605,15 @@ pub fn normalize_kana(c: char) -> Option<char> {
 }
 
 /// Returns true if furigana defininitely isn't needed.
-pub fn furigana_unneeded(text: &str, exclude_kanji: &FnvHashSet<char>) -> bool {
-    text.chars().all(|c| {
-        is_kana(c) || c.is_ascii() || c.is_numeric() || c == '々' || exclude_kanji.contains(&c)
-    })
+pub fn furigana_unneeded(
+    text: &str,
+    exclude_kanji: &FnvHashSet<char>,
+    exclude_words: &FnvHashSet<String>,
+) -> bool {
+    exclude_words.contains(text)
+        || text.chars().all(|c| {
+            is_kana(c) || c.is_ascii() || c.is_numeric() || c == '々' || exclude_kanji.contains(&c)
+        })
 }
 
 pub fn hiragana_to_katakana(c: char) -> Option<char> {
