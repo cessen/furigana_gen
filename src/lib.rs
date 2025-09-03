@@ -346,7 +346,11 @@ fn add_html_furigana(
             (surface, kana, word, pitches)
         };
 
-        let needs_help = learner.process(surface);
+        let needs_help = if !word.is_empty() && !is_kana_str(surface) {
+            learner.process(word)
+        } else {
+            learner.process(surface)
+        };
 
         if !needs_help {
             new_text.push_str(surface);
