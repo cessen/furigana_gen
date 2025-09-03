@@ -321,7 +321,7 @@ fn add_html_furigana(
     let mut new_text = String::new();
     for i in 0..worker.num_tokens() {
         let t = worker.token(i);
-        let (surface, kana, pitches) = {
+        let (surface, kana, word, pitches) = {
             let surface = t.surface();
             let feature = t.feature();
 
@@ -343,7 +343,7 @@ fn add_html_furigana(
                 &[]
             };
 
-            (surface, kana, pitches)
+            (surface, kana, word, pitches)
         };
 
         let needs_help = learner.process(surface);
@@ -362,6 +362,7 @@ fn add_html_furigana(
         let furigana_text = apply_furigana(
             surface,
             &kana,
+            word,
             exclude_kanji,
             exclude_words,
             pitches,
@@ -397,6 +398,7 @@ fn add_html_furigana(
 fn apply_furigana<'a>(
     surface: &'a str,
     kana: &'a str,
+    dictionary_form: &'a str,
     exclude_kanji: &FnvHashSet<char>,
     exclude_words: &FnvHashSet<String>,
     pitches: &[u8],
@@ -405,7 +407,10 @@ fn apply_furigana<'a>(
 ) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
 
-    if furigana_unneeded(surface, exclude_kanji, exclude_words) || !is_kana_str(kana) {
+    if furigana_unneeded(surface, exclude_kanji, exclude_words)
+        || furigana_unneeded(dictionary_form, exclude_kanji, exclude_words)
+        || !is_kana_str(kana)
+    {
         return Vec::new();
     }
 
