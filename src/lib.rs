@@ -14,9 +14,6 @@ use vibrato::{Dictionary, Tokenizer};
 use accent::AccentDict;
 use learner::Learner;
 
-// Include KANJI_FREQ, a frequency-ordered array of kanji characters.
-include!(concat!(env!("OUT_DIR"), "/kanji_freq_inc.rs"));
-
 // Parsing dictionary.
 const DICT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/system.dic.lz4"));
 
@@ -45,14 +42,18 @@ pub struct FuriganaGenerator {
 }
 
 impl FuriganaGenerator {
-    // - `exclude_count`: exclude the N most frequent kanji from furigana.
-    // Specifically, words made up *entirely* of those kanji will be excluded.
-    // If a word has some kanji that aren't in that set, even if it also has
-    // some that are, it will still get furigana.
-    //
-    // - `exclude_words`: don't put furigana on the words in this list.
+    /// - `exclude_kanji`: don't put furigana on words whose kanji are all in
+    ///   this list.  Note: if a word has *some* kanji that aren't in this list,
+    ///   even if it also has some that are, it will still get furigana.
+    /// - `exclude_words`: don't put furigana on the words in this list.
+    /// - `use_hiragana`: when true, the furigana will be written in hiragana.
+    ///   When false, the furigana will be written in katakana.
+    /// - `accent_mark`: the character to use as the pitch accent indicator for
+    ///   accented words.
+    /// - `accentless_mark`: the character to use as the pitch accent indicator
+    ///   for accentless (へいばん) words.
     pub fn new(
-        exclude_count: usize,
+        exclude_kanji: &[char],
         exclude_words: &[&str],
         use_hiragana: bool,
         accent_mark: Option<String>,
@@ -69,15 +70,15 @@ impl FuriganaGenerator {
             Dictionary::read(Cursor::new(&data)).unwrap()
         };
 
-        let exclude_kanji = {
+        let exclude_kanji_set = {
             let mut set = FnvHashSet::default();
-            for &c in KANJI_FREQ.iter().take(exclude_count) {
+            for &c in exclude_kanji {
                 set.insert(c);
             }
             set
         };
 
-        let exclude_words = {
+        let exclude_words_set = {
             let mut set = FnvHashSet::default();
             for word in exclude_words {
                 set.insert((*word).into());
@@ -99,8 +100,8 @@ impl FuriganaGenerator {
         Self {
             tokenizer: Tokenizer::new(dict),
             accent_dict: accent::build_accent_dictionary(),
-            exclude_kanji: exclude_kanji,
-            exclude_words: exclude_words,
+            exclude_kanji: exclude_kanji_set,
+            exclude_words: exclude_words_set,
             subs: subs,
             use_hiragana: use_hiragana,
             accent_mark: accent_mark,
