@@ -672,20 +672,30 @@ mod tests {
     pub fn get_furigana_gen() -> &'static FuriganaGenerator {
         use std::sync::OnceLock;
         static FURIGEN: OnceLock<FuriganaGenerator> = OnceLock::new();
-        FURIGEN.get_or_init(|| FuriganaGenerator::new(0, false, None, None))
+        FURIGEN.get_or_init(|| FuriganaGenerator::new(&[], &[], false, None, None))
     }
     pub fn get_furigana_gen_with_accent() -> &'static FuriganaGenerator {
         use std::sync::OnceLock;
         static FURIGEN: OnceLock<FuriganaGenerator> = OnceLock::new();
-        FURIGEN
-            .get_or_init(|| FuriganaGenerator::new(0, false, Some("＊".into()), Some("o".into())))
+        FURIGEN.get_or_init(|| {
+            FuriganaGenerator::new(&[], &[], false, Some("＊".into()), Some("o".into()))
+        })
     }
 
     #[test]
     fn apply_furigana_01() {
         let surface = "へぇ";
         let kana = "ヘー";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
+        let pairs = apply_furigana(
+            surface,
+            kana,
+            "へぇ",
+            &FnvHashSet::default(),
+            &FnvHashSet::default(),
+            &[],
+            None,
+            None,
+        );
 
         assert!(pairs.is_empty());
     }
@@ -694,7 +704,16 @@ mod tests {
     fn apply_furigana_02() {
         let surface = "へぇー";
         let kana = "ヘー";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
+        let pairs = apply_furigana(
+            surface,
+            kana,
+            "へぇー",
+            &FnvHashSet::default(),
+            &FnvHashSet::default(),
+            &[],
+            None,
+            None,
+        );
 
         assert!(pairs.is_empty());
     }
@@ -703,7 +722,16 @@ mod tests {
     fn apply_furigana_03() {
         let surface = "へ";
         let kana = "え";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
+        let pairs = apply_furigana(
+            surface,
+            kana,
+            "へ",
+            &FnvHashSet::default(),
+            &FnvHashSet::default(),
+            &[],
+            None,
+            None,
+        );
 
         assert!(pairs.is_empty());
     }
@@ -712,7 +740,16 @@ mod tests {
     fn apply_furigana_04() {
         let surface = "食べる";
         let kana = "タベル";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
+        let pairs = apply_furigana(
+            surface,
+            kana,
+            "食べる",
+            &FnvHashSet::default(),
+            &FnvHashSet::default(),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(
             &[("食".into(), "タ".into()), ("べる".into(), "".into())],
@@ -724,7 +761,16 @@ mod tests {
     fn apply_furigana_05() {
         let surface = "流れ出す";
         let kana = "ながれだす";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
+        let pairs = apply_furigana(
+            surface,
+            kana,
+            "流れ出す",
+            &FnvHashSet::default(),
+            &FnvHashSet::default(),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(
             &[
@@ -741,7 +787,16 @@ mod tests {
     fn apply_furigana_06() {
         let surface = "物の怪";
         let kana = "もののけ";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
+        let pairs = apply_furigana(
+            surface,
+            kana,
+            "物の怪",
+            &FnvHashSet::default(),
+            &FnvHashSet::default(),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(&[("物の怪".into(), "もののけ".into())], &pairs[..]);
     }
@@ -750,7 +805,16 @@ mod tests {
     fn apply_furigana_07() {
         let surface = "ご飯";
         let kana = "ゴハン";
-        let pairs = apply_furigana(surface, kana, &FnvHashSet::default(), &[], None, None);
+        let pairs = apply_furigana(
+            surface,
+            kana,
+            "ご飯",
+            &FnvHashSet::default(),
+            &FnvHashSet::default(),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(
             &[("ご".into(), "".into()), ("飯".into(), "ハン".into())],
