@@ -823,6 +823,32 @@ mod tests {
     }
 
     #[test]
+    fn apply_furigana_08() {
+        let surface = "お疲れ様";
+        let kana = "オツカレサマ";
+        let pairs = apply_furigana(
+            surface,
+            kana,
+            "お疲れ様",
+            &FnvHashSet::default(),
+            &FnvHashSet::default(),
+            &[],
+            None,
+            None,
+        );
+
+        assert_eq!(
+            &[
+                ("お".into(), "".into()),
+                ("疲".into(), "ツカ".into()),
+                ("れ".into(), "".into()),
+                ("様".into(), "サマ".into()),
+            ],
+            &pairs[..]
+        );
+    }
+
+    #[test]
     fn is_equivalent_kana_01() {
         assert!(is_equivalent_kana('か', 'カ'));
         assert!(is_equivalent_kana('カ', 'か'));
