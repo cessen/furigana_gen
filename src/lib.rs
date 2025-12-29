@@ -423,6 +423,7 @@ fn apply_furigana<'a>(
     let mut kana = kana;
 
     // Trim any kana from the start.
+    let start_kana;
     {
         let mut start_s = 0;
         let mut start_k = 0;
@@ -434,12 +435,13 @@ fn apply_furigana<'a>(
                 break;
             }
         }
-        out.push((surface[..start_s].into(), "".into()));
+        start_kana = &surface[..start_s];
         surface = &surface[start_s..];
         kana = &kana[start_k..];
     }
 
     // Trim any kana from the end.
+    let end_kana;
     {
         let mut end_s = surface.len();
         let mut end_k = kana.len();
@@ -451,7 +453,7 @@ fn apply_furigana<'a>(
                 break;
             }
         }
-        out.push((surface[end_s..].into(), "".into()));
+        end_kana = &surface[end_s..];
         surface = &surface[..end_s];
         kana = &kana[..end_k];
     }
@@ -476,17 +478,20 @@ fn apply_furigana<'a>(
             .unwrap();
 
         // Insert the segments.
-        out.insert(out.len() - 2, (surface[..si].into(), kana[..ki].into()));
-        out.insert(
-            out.len() - 2,
-            (surface[si..(si + sc.len_utf8())].into(), "".into()),
-        );
+        out.push((surface[..si].into(), kana[..ki].into()));
+        out.push((surface[si..(si + sc.len_utf8())].into(), "".into()));
         surface = &surface[(si + sc.len_utf8())..];
         kana = &kana[(ki + kc.len_utf8())..];
     }
 
     // Left over.
-    out.insert(out.len() - 1, (surface.into(), kana.into()));
+    out.push((surface.into(), kana.into()));
+
+    // Put back the start/end kana.
+    out.insert(0, (start_kana.into(), "".into()));
+    out.push((end_kana.into(), "".into()));
+
+    // Clear out empty elements.
     out.retain(|(s, _)| !s.is_empty());
 
     // Attach pitch accent indicator if there is one and it's unambiguous.
