@@ -290,7 +290,7 @@ fn write_xml(text: &mut String, event: &quick_xml::events::Event) {
         }
 
         Event::DocType(e) => {
-            text.push_str("<!DOCTYPE");
+            text.push_str("<!DOCTYPE ");
             text.push_str(to_str(e));
             text.push_str(">");
         }
@@ -1035,5 +1035,13 @@ mod tests {
             gen.add_html_furigana("中"),
             r#"<ruby>中<rt><ruby class="pitch_accent">ナ<rt>＊</rt></ruby>カ</rt></ruby>"#
         );
+    }
+
+    #[test]
+    fn doctype_round_trip() {
+        let mut gen = get_furigana_gen().new_session(false);
+
+        let text = "<!DOCTYPE html>";
+        assert_eq!(gen.add_html_furigana(text), text);
     }
 }
